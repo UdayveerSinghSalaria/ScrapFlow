@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+frontEnd/node_modules/
+
+# env files
+.env
+.env.local
+.env.*.local
+frontEnd/.env
+
+# build output
+dist/
+build/
+frontEnd/dist/
+
+# logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
+
+# demo_repo (cloned reference, not part of our code)
+demo_repo/
+
+# frontEnd (has its own repo: https://github.com/UdayveerSinghSalaria/ScrapFlow)
+frontEnd/
+
+# supabase local
+supabase/.temp/
+
+# temp files
+*.tmp
+*.temp
