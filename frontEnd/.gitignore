@@ -1,17 +1,14 @@
 # dependencies
 node_modules/
-frontEnd/node_modules/
 
 # env files
 .env
 .env.local
 .env.*.local
-frontEnd/.env
 
 # build output
 dist/
 build/
-frontEnd/dist/
 
 # logs
 *.log
@@ -25,12 +22,5 @@ Thumbs.db
 .vscode/
 .idea/
 
-# demo_repo (cloned reference, not part of our code)
-demo_repo/
-
 # supabase local
 supabase/.temp/
-
-# temp files
-*.tmp
-*.temp
