@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+frontEnd/node_modules/
+
+# env files
+.env
+.env.local
+.env.*.local
+frontEnd/.env
+
+# build output
+dist/
+build/
+frontEnd/dist/
+
+# logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
+
+# supabase local
+supabase/.temp/
