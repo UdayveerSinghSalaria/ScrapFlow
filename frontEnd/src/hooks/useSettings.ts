@@ -18,6 +18,7 @@ export function useSettings() {
   const fetchSettings = useCallback(async () => {
     setLoading(true)
     setError(null)
+    console.log('[Supabase] Fetching settings...')
     const { data, error: err } = await supabase
       .from('settings')
       .select('*')
@@ -25,6 +26,7 @@ export function useSettings() {
       .single()
 
     if (err || !data) {
+      console.warn('[Supabase] Settings fetch issue:', err?.code, err?.message)
       // If no settings exist, create default
       if (err?.code === 'PGRST116') {
         const { data: created, error: createErr } = await supabase
@@ -33,9 +35,11 @@ export function useSettings() {
           .select()
           .single()
         if (createErr) {
+          console.error('[Supabase] Settings create error:', createErr)
           setError(createErr.message)
           setSettings({ id: 'local', ...DEFAULT_SETTINGS })
         } else {
+          console.log('[Supabase] Settings created:', created)
           setSettings(created)
         }
       } else {
@@ -43,6 +47,7 @@ export function useSettings() {
         setSettings({ id: 'local', ...DEFAULT_SETTINGS })
       }
     } else {
+      console.log('[Supabase] Settings loaded:', data)
       setSettings(data)
     }
     setLoading(false)

@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS buyers (
   state TEXT NOT NULL DEFAULT '—',
   rating DECIMAL(2,1) NOT NULL DEFAULT 4.0,
   active BOOLEAN NOT NULL DEFAULT true,
+  phone TEXT,
+  email TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -59,13 +61,13 @@ CREATE INDEX IF NOT EXISTS idx_buyer_rates_buyer ON buyer_rates(buyer_id);
 -- ============================================
 
 -- Insert buyers
-INSERT INTO buyers (id, name, state, rating, active) VALUES
-  ('a1111111-1111-1111-1111-111111111111', 'Buyer A', 'Punjab', 4.6, true),
-  ('b2222222-2222-2222-2222-222222222222', 'Buyer B', 'Haryana', 4.8, true),
-  ('c3333333-3333-3333-3333-333333333333', 'Buyer C', 'Gujarat', 4.3, true),
-  ('d4444444-4444-4444-4444-444444444444', 'Buyer D', 'Maharashtra', 4.5, true),
-  ('e5555555-5555-5555-5555-555555555555', 'Buyer E', 'Delhi', 4.1, true),
-  ('f6666666-6666-6666-6666-666666666666', 'Buyer F', 'Punjab', 3.9, false)
+INSERT INTO buyers (id, name, state, rating, active, phone, email) VALUES
+  ('a1111111-1111-1111-1111-111111111111', 'Buyer A', 'Punjab', 4.6, true, '+91-98765-43210', 'buyer.a@scrapmail.com'),
+  ('b2222222-2222-2222-2222-222222222222', 'Buyer B', 'Haryana', 4.8, true, '+91-87654-32109', 'buyer.b@scrapmail.com'),
+  ('c3333333-3333-3333-3333-333333333333', 'Buyer C', 'Gujarat', 4.3, true, '+91-76543-21098', 'buyer.c@scrapmail.com'),
+  ('d4444444-4444-4444-4444-444444444444', 'Buyer D', 'Maharashtra', 4.5, true, '+91-65432-10987', 'buyer.d@scrapmail.com'),
+  ('e5555555-5555-5555-5555-555555555555', 'Buyer E', 'Delhi', 4.1, true, '+91-54321-09876', 'buyer.e@scrapmail.com'),
+  ('f6666666-6666-6666-6666-666666666666', 'Buyer F', 'Punjab', 3.9, false, '+91-43210-98765', 'buyer.f@scrapmail.com')
 ON CONFLICT (id) DO NOTHING;
 
 -- Insert buyer rates

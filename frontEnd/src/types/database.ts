@@ -10,6 +10,8 @@ export interface Buyer {
   state: string
   rating: number
   active: boolean
+  phone: string | null
+  email: string | null
   created_at: string
 }
 

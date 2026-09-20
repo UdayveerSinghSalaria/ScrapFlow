@@ -15,6 +15,8 @@ export function useBuyers() {
     setLoading(true)
     setError(null)
 
+    console.log('[Supabase] Fetching buyers...')
+
     // Fetch buyers
     const { data: buyersData, error: buyersErr } = await supabase
       .from('buyers')
@@ -22,10 +24,13 @@ export function useBuyers() {
       .order('name')
 
     if (buyersErr) {
+      console.error('[Supabase] Buyers fetch error:', buyersErr)
       setError(buyersErr.message)
       setLoading(false)
       return
     }
+
+    console.log('[Supabase] Buyers raw:', buyersData?.length, 'rows', buyersData)
 
     // Fetch all rates
     const { data: ratesData, error: ratesErr } = await supabase
@@ -33,10 +38,13 @@ export function useBuyers() {
       .select('*')
 
     if (ratesErr) {
+      console.error('[Supabase] Rates fetch error:', ratesErr)
       setError(ratesErr.message)
       setLoading(false)
       return
     }
+
+    console.log('[Supabase] Rates raw:', ratesData?.length, 'rows')
 
     // Merge rates into buyers
     const buyersWithRates: BuyerWithRates[] = (buyersData || []).map((b) => {
@@ -49,6 +57,7 @@ export function useBuyers() {
       return { ...b, rates }
     })
 
+    console.log('[Supabase] Buyers with rates:', buyersWithRates.length)
     setBuyers(buyersWithRates)
     setLoading(false)
   }, [])
@@ -77,11 +86,13 @@ export function useBuyers() {
     state: string
     material: MaterialCategory
     rate: number
+    phone?: string
+    email?: string
   }) => {
     // Insert buyer
     const { data: newBuyer, error: buyerErr } = await supabase
       .from('buyers')
-      .insert({ name: data.name, state: data.state, rating: 4.0, active: true })
+      .insert({ name: data.name, state: data.state, rating: 4.0, active: true, phone: data.phone || null, email: data.email || null })
       .select()
       .single()
 
@@ -116,5 +127,57 @@ export function useBuyers() {
     )
   }, [buyers])
 
-  return { buyers, loading, error, addBuyer, toggleBuyer, bestBuyer, refetch: fetchBuyers }
+  // Update local state AND sync changes to Supabase
+  const setBuyersAndSync = useCallback(async (newBuyers: BuyerWithRates[] | ((prev: BuyerWithRates[]) => BuyerWithRates[])) => {
+    const updated = typeof newBuyers === 'function' ? newBuyers(buyers) : newBuyers;
+    console.log('[Sync] setBuyersAndSync called. Old:', buyers.length, 'New:', updated.length);
+    
+    // Detect changes
+    const oldMap = new Map(buyers.map(b => [b.name, b]));
+    const newMap = new Map(updated.map(b => [b.name, b]));
+    
+    // Find updated buyers (active toggle, contact changes)
+    for (const [name, newBuyer] of newMap) {
+      const oldBuyer = oldMap.get(name);
+      if (oldBuyer) {
+        // Existing buyer — check for changes
+        if (oldBuyer.active !== newBuyer.active) {
+          console.log('[Sync] Active toggle:', name, oldBuyer.active, '->', newBuyer.active);
+          const { error } = await supabase.from('buyers').update({ active: newBuyer.active }).eq('name', name);
+          if (error) console.error('[Sync] Active update error:', error);
+        }
+        if (oldBuyer.phone !== newBuyer.phone || oldBuyer.email !== newBuyer.email) {
+          console.log('[Sync] Contact update:', name);
+          const { error } = await supabase.from('buyers').update({ phone: newBuyer.phone || null, email: newBuyer.email || null }).eq('name', name);
+          if (error) console.error('[Sync] Contact update error:', error);
+        }
+      } else {
+        // New buyer — insert into DB
+        console.log('[Sync] New buyer:', name);
+        const { data: inserted, error: insertErr } = await supabase
+          .from('buyers')
+          .insert({ name: newBuyer.name, state: newBuyer.state, rating: newBuyer.rating, active: newBuyer.active, phone: newBuyer.phone || null, email: newBuyer.email || null })
+          .select()
+          .single();
+        
+        if (insertErr) {
+          console.error('[Sync] New buyer insert error:', insertErr);
+        } else if (inserted) {
+          // Insert rates for the new buyer
+          for (const [material, rate] of Object.entries(newBuyer.rates)) {
+            if (rate) {
+              const { error: rateErr } = await supabase.from('buyer_rates').insert({ buyer_id: inserted.id, material, rate });
+              if (rateErr) console.error('[Sync] Rate insert error:', rateErr);
+            }
+          }
+        }
+      }
+    }
+    
+    // Refetch to get complete data
+    console.log('[Sync] Refetching buyers...');
+    await fetchBuyers();
+  }, [buyers, fetchBuyers]);
+
+  return { buyers, loading, error, addBuyer, toggleBuyer, bestBuyer, setBuyersAndSync, refetch: fetchBuyers }
 }

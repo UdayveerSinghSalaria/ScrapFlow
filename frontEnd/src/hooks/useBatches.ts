@@ -20,14 +20,17 @@ export function useBatches() {
   const fetchBatches = useCallback(async () => {
     setLoading(true)
     setError(null)
+    console.log('[Supabase] Fetching batches...')
     const { data, error: err } = await supabase
       .from('batches')
       .select('*')
       .order('created_at', { ascending: false })
     if (err) {
+      console.error('[Supabase] Batches fetch error:', err)
       setError(err.message)
       setBatches([])
     } else {
+      console.log('[Supabase] Batches fetched:', data?.length, 'rows', data)
       setBatches(data || [])
     }
     setLoading(false)
@@ -119,5 +122,57 @@ export function useBatches() {
     await fetchBatches()
   }, [batches, fetchBatches])
 
-  return { batches, loading, error, addBatch, addBatchBulk, updateBatchStatus, deleteBatch, refetch: fetchBatches }
+  // Update local state AND sync changes to Supabase
+  const setBatchesAndSync = useCallback(async (newBatches: Batch[] | ((prev: Batch[]) => Batch[])) => {
+    const updated = typeof newBatches === 'function' ? newBatches(batches) : newBatches;
+    console.log('[Sync] setBatchesAndSync called. Old:', batches.length, 'New:', updated.length);
+    
+    // Detect status changes and deletions
+    const oldMap = new Map(batches.map(b => [b.id, b]));
+    const newMap = new Map(updated.map(b => [b.id, b]));
+    
+    // Find status changes
+    for (const [id, newBatch] of newMap) {
+      const oldBatch = oldMap.get(id);
+      if (oldBatch && oldBatch.status !== newBatch.status) {
+        console.log('[Sync] Status change:', id, oldBatch.status, '->', newBatch.status);
+        const { error } = await supabase.from('batches').update({ status: newBatch.status }).eq('id', id);
+        if (error) console.error('[Sync] Status update error:', error);
+      }
+    }
+    
+    // Find deletions
+    for (const [id] of oldMap) {
+      if (!newMap.has(id)) {
+        console.log('[Sync] Deletion:', id);
+        const { error } = await supabase.from('batches').delete().eq('id', id);
+        if (error) console.error('[Sync] Delete error:', error);
+      }
+    }
+    
+    // Find new batches (not in old map)
+    for (const [id, newBatch] of newMap) {
+      if (!oldMap.has(id)) {
+        console.log('[Sync] New batch:', id);
+        const { error } = await supabase.from('batches').insert({
+          id: newBatch.id,
+          material: newBatch.material,
+          grade: newBatch.grade,
+          quantity: newBatch.quantity,
+          buyer_id: newBatch.buyer_id,
+          value: newBatch.value,
+          status: newBatch.status,
+          factory: newBatch.factory,
+          notes: newBatch.notes,
+        });
+        if (error) console.error('[Sync] Insert error:', error);
+      }
+    }
+    
+    // Refetch to get complete data
+    console.log('[Sync] Refetching...');
+    await fetchBatches();
+  }, [batches, fetchBatches]);
+
+  return { batches, loading, error, addBatch, addBatchBulk, updateBatchStatus, deleteBatch, setBatchesAndSync, refetch: fetchBatches }
 }

@@ -11,7 +11,7 @@ type Status = BatchStatus;
 type Depth = "Quick" | "Standard" | "Detailed";
 
 interface Batch { id: string; date: string; material: Mat; grade: string; qty: number; buyer: string; value: number; status: Status }
-interface Buyer { name: string; state: string; rating: number; active: boolean; rates: Partial<Record<Mat, number>> }
+interface Buyer { name: string; state: string; rating: number; active: boolean; phone: string; email: string; rates: Partial<Record<Mat, number>> }
 interface Cfg { name: string; factory: string; alerts: boolean; email: boolean; autoRoute: boolean }
 interface Det { material: Mat; qty: number; grade: string; conf: number; purity: number }
 type NewBatch = Omit<Batch, "id" | "date" | "status">;
@@ -23,6 +23,7 @@ const PICON: Record<Page, string> = { Dashboard: "grid", "Scan Scrap": "scan", "
 const FACTORIES = ["Factory 1 – Ludhiana", "Factory 2 – Rajpura", "Factory 3 – Mohali"];
 const MATS: Mat[] = ["Copper", "Aluminium", "Steel", "Brass"];
 const MCOL: Record<Mat, string> = { Copper: "#f08a3c", Aluminium: "#e9f2ed", Steel: "#4da3ff", Brass: "#e6c04a", "Stainless Steel": "#a8b0b8", Plastic: "#5cb85c", "Mixed Scrap": "#9aa0a6" };
+const PRICES: Record<Mat, number> = { Copper: 720, Aluminium: 170, Steel: 46, Brass: 405, "Stainless Steel": 120, Plastic: 15, "Mixed Scrap": 58 };
 const PAL: Record<string, string[]> = {
   mix: ["#5a5f66", "#2b2f35", "#8a5a3a", "#b87333", "#9aa0a6", "#3a3f45"],
   Copper: ["#3b2a22", "#b87333", "#6b4a35", "#d99058", "#2b2f35"],
@@ -40,16 +41,79 @@ const csv = (name: string, rows: (string | number)[][]) => {
   a.download = name;
   a.click();
 };
-/** Integration point: replace with a call to your real vision model / API. */
-const detectScrap = async (_file: File | null, kg: number, depth: Depth): Promise<Det[]> => {
-  await new Promise((r) => setTimeout(r, { Quick: 900, Standard: 1800, Detailed: 3000 }[depth]));
-  const c = { Quick: 0, Standard: 4, Detailed: 7 }[depth];
-  const cu = Math.round(kg * 0.18), al = Math.round(kg * 0.32);
-  return [
-    { material: "Copper", qty: cu, grade: "A", conf: 89 + c, purity: 98 },
-    { material: "Aluminium", qty: al, grade: "B", conf: 87 + c, purity: 94 },
-    { material: "Steel", qty: kg - cu - al, grade: "A", conf: 90 + c, purity: 97 },
-  ];
+/** Integration point: call the real classifier API or fall back to mock. */
+const CLASSIFIER_URL = "http://localhost:8000";
+
+const detectScrap = async (file: File | null, kg: number, depth: Depth): Promise<Det[]> => {
+  // If no file, use mock data
+  if (!file) {
+    const c = { Quick: 0, Standard: 4, Detailed: 7 }[depth];
+    const cu = Math.round(kg * 0.18), al = Math.round(kg * 0.32);
+    return [
+      { material: "Copper", qty: cu, grade: "A", conf: 89 + c, purity: 98 },
+      { material: "Aluminium", qty: al, grade: "B", conf: 87 + c, purity: 94 },
+      { material: "Steel", qty: kg - cu - al, grade: "A", conf: 90 + c, purity: 97 },
+    ];
+  }
+
+  try {
+    // Convert file to base64
+    const reader = new FileReader();
+    const base64 = await new Promise<string>((resolve) => {
+      reader.onload = () => resolve(reader.result as string);
+      reader.readAsDataURL(file);
+    });
+
+    // Call the real classifier API
+    const formData = new FormData();
+    formData.append("image", file);
+    if (kg) formData.append("weight_kg", String(kg));
+
+    const res = await fetch(`${CLASSIFIER_URL}/classify/upload`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) throw new Error(`Classifier returned ${res.status}`);
+    const data = await res.json();
+
+    if (!data.success) {
+      // Use fallback classification from the API
+      const fb = data.fallback;
+      const purity = 100 - (fb.contamination_percent || 0);
+      const conf = Math.round(fb.confidence * 100);
+      return [{ material: fb.material, qty: kg, grade: fb.grade, conf, purity }];
+    }
+
+    const cls = data.classification;
+
+    // If composition has multiple entries, split the kg proportionally
+    if (cls.composition && cls.composition.length > 1) {
+      return cls.composition.map((c: any) => ({
+        material: c.material,
+        qty: Math.round(kg * (c.percentage / 100)),
+        grade: c.grade,
+        conf: Math.round(c.confidence * 100),
+        purity: Math.round(100 - (cls.contamination_percent || 0) * (c.percentage / 100)),
+      }));
+    }
+
+    // Single material
+    const purity = 100 - (cls.contamination_percent || 0);
+    const conf = Math.round(cls.confidence * 100);
+    return [{ material: cls.material, qty: kg, grade: cls.grade, conf, purity }];
+
+  } catch (err) {
+    console.warn("[Classifier] API unavailable, using mock data:", err);
+    // Fallback to mock if API is down
+    const c = { Quick: 0, Standard: 4, Detailed: 7 }[depth];
+    const cu = Math.round(kg * 0.18), al = Math.round(kg * 0.32);
+    return [
+      { material: "Copper", qty: cu, grade: "A", conf: 89 + c, purity: 98 },
+      { material: "Aluminium", qty: al, grade: "B", conf: 87 + c, purity: 94 },
+      { material: "Steel", qty: kg - cu - al, grade: "A", conf: 90 + c, purity: 97 },
+    ];
+  }
 };
 
 /* ───────────── Icons & art ───────────── */
@@ -80,6 +144,9 @@ const P: Record<string, string> = {
   plus: "M12 5v14M5 12h14",
   check: "M20 6L9 17l-5-5",
   menu: "M3 6h18M3 12h18M3 18h18",
+  pencil: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z",
+  phone: "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z",
+  mail: "M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z M22 6l-10 7L2 6",
 };
 const I = ({ n, s = 20 }: { n: string; s?: number }) => (
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={P[n]} /></svg>
@@ -300,13 +367,13 @@ function Scan({ buyers, batches, onAdd, go }: { buyers: Buyer[]; batches: Batch[
 function Buyers({ buyers, setBuyers }: { buyers: Buyer[]; setBuyers: (b: Buyer[]) => void }) {
   const [s, setS] = useState("");
   const [m, setM] = useState<"All" | Mat>("All");
-  const [f, setF] = useState({ name: "", state: "", mat: "Copper" as Mat, rate: "" });
+  const [f, setF] = useState({ name: "", state: "", mat: "Copper" as Mat, rate: "", phone: "", email: "" });
   const list = buyers.filter((b) => (m === "All" || b.rates[m]) && (b.name + b.state).toLowerCase().includes(s.toLowerCase()));
   const add = () => {
     if (!f.name.trim() || !+f.rate) return;
     const rates: Buyer["rates"] = {}; rates[f.mat] = +f.rate;
-    setBuyers([...buyers, { name: f.name.trim(), state: f.state.trim() || "—", rating: 4, active: true, rates }]);
-    setF({ ...f, name: "", rate: "" });
+    setBuyers([...buyers, { name: f.name.trim(), state: f.state.trim() || "—", rating: 4, active: true, phone: f.phone.trim(), email: f.email.trim(), rates }]);
+    setF({ ...f, name: "", rate: "", phone: "", email: "" });
   };
   return (
     <>
@@ -314,12 +381,19 @@ function Buyers({ buyers, setBuyers }: { buyers: Buyer[]; setBuyers: (b: Buyer[]
         <div className="between"><h2>Buyer Network</h2>
           <div className="tools"><input className="in" placeholder="Search buyer or state" value={s} onChange={(e) => setS(e.target.value)} />
             <select className="in" value={m} onChange={(e) => setM(e.target.value as "All" | Mat)}>{["All", ...MATS].map((x) => <option key={x}>{x}</option>)}</select></div></div>
-        <div className="ovf"><table className="tbl"><thead><tr>{["Buyer", "State", "Rating", "Rates (₹/kg)", "Status"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+        <div className="ovf"><table className="tbl"><thead><tr>{["Buyer", "State", "Rating", "Rates (₹/kg)", "Status", "Contact"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
           <tbody>{list.map((b) => (
             <tr key={b.name}><td><b>{b.name}</b></td><td>{b.state}</td><td>★ {b.rating}</td>
               <td>{(Object.entries(b.rates) as [Mat, number][]).map(([k, v]) => <span key={k} className="chip" style={{ color: MCOL[k] }}>{k} {v}</span>)}</td>
-              <td><button className={"tgl " + (b.active ? "on" : "")} onClick={() => setBuyers(buyers.map((x) => (x === b ? { ...x, active: !x.active } : x)))}>{b.active ? "Active" : "Paused"}</button></td></tr>))}
-            {!list.length && <tr><td colSpan={5} className="mut">No buyers match. Clear the filters or add a buyer below.</td></tr>}</tbody></table></div>
+              <td><button className={"tgl " + (b.active ? "on" : "")} onClick={() => setBuyers(buyers.map((x) => (x === b ? { ...x, active: !x.active } : x)))}>{b.active ? "Active" : "Paused"}</button></td>
+              <td>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {b.phone && <a href={`tel:${b.phone}`} className="btn" style={{ padding: '4px 10px', fontSize: 13, textDecoration: 'none' }} title={`Call ${b.phone}`}><I n="phone" s={14} /> Call</a>}
+                  {b.email && <a href={`mailto:${b.email}`} className="btn ghost" style={{ padding: '4px 10px', fontSize: 13, textDecoration: 'none' }} title={`Email ${b.email}`}><I n="mail" s={14} /> Email</a>}
+                  {!b.phone && !b.email && <span className="mut">No contact</span>}
+                </div>
+              </td></tr>))}
+            {!list.length && <tr><td colSpan={6} className="mut">No buyers match. Clear the filters or add a buyer below.</td></tr>}</tbody></table></div>
       </div>
       <div className="card"><h2 style={{ marginBottom: 12 }}>Add buyer</h2>
         <div className="tools">
@@ -327,6 +401,8 @@ function Buyers({ buyers, setBuyers }: { buyers: Buyer[]; setBuyers: (b: Buyer[]
           <input className="in" placeholder="State" value={f.state} onChange={(e) => setF({ ...f, state: e.target.value })} />
           <select className="in" value={f.mat} onChange={(e) => setF({ ...f, mat: e.target.value as Mat })}>{MATS.map((x) => <option key={x}>{x}</option>)}</select>
           <input className="in" type="number" placeholder="₹ / kg" value={f.rate} onChange={(e) => setF({ ...f, rate: e.target.value })} />
+          <input className="in" type="tel" placeholder="Phone (optional)" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
+          <input className="in" type="email" placeholder="Email (optional)" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
           <button className="btn" onClick={add}><I n="plus" s={16} /> Add buyer</button></div></div>
     </>
   );
@@ -336,21 +412,108 @@ function Buyers({ buyers, setBuyers }: { buyers: Buyer[]; setBuyers: (b: Buyer[]
 function Inventory({ batches, setBatches, q, setQ }: { batches: Batch[]; setBatches: (b: Batch[]) => void; q: string; setQ: (s: string) => void }) {
   const [st, setSt] = useState<"All" | Status>("All");
   const [m, setM] = useState<"All" | Mat>("All");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editData, setEditData] = useState<{ material: Mat; grade: string; qty: number; buyer: string; value: number; status: Status }>({ material: "Copper", grade: "A", qty: 0, buyer: "", value: 0, status: "Scheduled" });
+  const [showAdd, setShowAdd] = useState(false);
+  const [addData, setAddData] = useState<{ material: Mat; grade: string; qty: number; buyer: string; value: number; status: Status }>({ material: "Copper", grade: "A", qty: 0, buyer: "", value: 0, status: "Scheduled" });
+
   const list = batches.filter((b) => (st === "All" || b.status === st) && (m === "All" || b.material === m) && Object.values(b).join(" ").toLowerCase().includes(q.toLowerCase()));
+
+  const startEdit = (b: Batch) => {
+    setEditId(b.id);
+    setEditData({ material: b.material, grade: b.grade, qty: b.qty, buyer: b.buyer, value: b.value, status: b.status });
+  };
+
+  const saveEdit = () => {
+    if (!editId) return;
+    setBatches(batches.map((x) => x.id === editId ? { ...x, ...editData } : x));
+    setEditId(null);
+  };
+
+  const deleteBatch = (id: string) => {
+    if (!confirm("Delete batch " + id + "?")) return;
+    setBatches(batches.filter((x) => x.id !== id));
+  };
+
+  const addBatch = () => {
+    if (!addData.qty || !addData.value) return;
+    const newId = "SC" + (batches.reduce((max, b) => { const n = parseInt(b.id.replace("SC", ""), 10); return n > max ? n : max; }, 0) + 1);
+    const now = new Date();
+    const dateStr = now.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    const newBatch: Batch = { id: newId, date: dateStr, material: addData.material, grade: addData.grade, qty: addData.qty, buyer: addData.buyer || "—", value: addData.value, status: addData.status };
+    setBatches([newBatch, ...batches]);
+    setShowAdd(false);
+    setAddData({ material: "Copper", grade: "A", qty: 0, buyer: "", value: 0, status: "Scheduled" });
+  };
+
+  const buyers = (batches[0] ? [] : []); // placeholder, buyers come from props via parent
+
   return (
-    <div className="card">
-      <div className="between"><h2>Inventory</h2>
-        <div className="tools"><input className="in" placeholder="Search batches…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <select className="in" value={m} onChange={(e) => setM(e.target.value as "All" | Mat)}>{["All", ...MATS].map((x) => <option key={x}>{x}</option>)}</select>
-          <select className="in" value={st} onChange={(e) => setSt(e.target.value as "All" | Status)}>{["All", "Delivered", "In Transit", "Scheduled"].map((x) => <option key={x}>{x}</option>)}</select>
-          <button className="btn ghost" onClick={() => csv("inventory.csv", [["ID", "Date", "Material", "Grade", "Qty", "Buyer", "Value", "Status"], ...list.map((b) => [b.id, `"${b.date}"`, b.material, b.grade, b.qty, b.buyer, b.value, b.status])])}><I n="dl" s={16} /> Export CSV</button></div></div>
-      <div className="ovf"><table className="tbl"><thead><tr>{["#", "Date & Time", "Material", "Grade", "Quantity", "Buyer", "Value", "Status", ""].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-        <tbody>{list.map((b) => (
-          <tr key={b.id}><td>{b.id}</td><td>{b.date}</td><td style={{ color: MCOL[b.material] }}>{b.material}</td><td>{b.grade}</td><td>{b.qty} kg</td><td>{b.buyer}</td><td><b>{inr(b.value)}</b></td>
-            <td><select className={"stsel st " + b.status.replace(" ", "")} value={b.status} onChange={(e) => setBatches(batches.map((x) => (x.id === b.id ? { ...x, status: e.target.value as Status } : x)))}>{["Delivered", "In Transit", "Scheduled"].map((x) => <option key={x}>{x}</option>)}</select></td>
-            <td><button className="ib" aria-label={`Delete ${b.id}`} onClick={() => setBatches(batches.filter((x) => x.id !== b.id))}><I n="trash" s={16} /></button></td></tr>))}
-          {!list.length && <tr><td colSpan={9} className="mut">No batches found. Change the filters or scan new scrap.</td></tr>}</tbody></table></div>
-    </div>
+    <>
+      <div className="card">
+        <div className="between"><h2>Inventory</h2>
+          <div className="tools">
+            <input className="in" placeholder="Search batches…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <select className="in" value={m} onChange={(e) => setM(e.target.value as "All" | Mat)}>{["All", ...MATS].map((x) => <option key={x}>{x}</option>)}</select>
+            <select className="in" value={st} onChange={(e) => setSt(e.target.value as "All" | Status)}>{["All", "Delivered", "In Transit", "Scheduled"].map((x) => <option key={x}>{x}</option>)}</select>
+            <button className="btn" onClick={() => setShowAdd(!showAdd)}><I n="plus" s={16} /> Add Batch</button>
+            <button className="btn ghost" onClick={() => csv("inventory.csv", [["ID", "Date", "Material", "Grade", "Qty", "Buyer", "Value", "Status"], ...list.map((b) => [b.id, `"${b.date}"`, b.material, b.grade, b.qty, b.buyer, b.value, b.status])])}><I n="dl" s={16} /> Export</button>
+          </div>
+        </div>
+
+        {showAdd && (
+          <div style={{ background: "var(--bg2)", borderRadius: 12, padding: 16, marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div><span className="mut" style={{ fontSize: 12 }}>Material</span><br />
+              <select className="in" value={addData.material} onChange={(e) => setAddData({ ...addData, material: e.target.value as Mat })}>{MATS.map((x) => <option key={x}>{x}</option>)}</select></div>
+            <div><span className="mut" style={{ fontSize: 12 }}>Grade</span><br />
+              <select className="in" value={addData.grade} onChange={(e) => setAddData({ ...addData, grade: e.target.value })}>{["A", "B", "C"].map((x) => <option key={x}>{x}</option>)}</select></div>
+            <div><span className="mut" style={{ fontSize: 12 }}>Qty (kg)</span><br />
+              <input className="in" type="number" placeholder="0" value={addData.qty || ""} onChange={(e) => setAddData({ ...addData, qty: +e.target.value })} /></div>
+            <div><span className="mut" style={{ fontSize: 12 }}>Buyer</span><br />
+              <input className="in" placeholder="Buyer name" value={addData.buyer} onChange={(e) => setAddData({ ...addData, buyer: e.target.value })} /></div>
+            <div><span className="mut" style={{ fontSize: 12 }}>Value (₹)</span><br />
+              <input className="in" type="number" placeholder="0" value={addData.value || ""} onChange={(e) => setAddData({ ...addData, value: +e.target.value })} /></div>
+            <div><span className="mut" style={{ fontSize: 12 }}>Status</span><br />
+              <select className="in" value={addData.status} onChange={(e) => setAddData({ ...addData, status: e.target.value as Status })}>{["Scheduled", "In Transit", "Delivered"].map((x) => <option key={x}>{x}</option>)}</select></div>
+            <button className="btn" onClick={addBatch}><I n="plus" s={16} /> Add</button>
+            <button className="btn ghost" onClick={() => setShowAdd(false)}>Cancel</button>
+          </div>
+        )}
+
+        <div className="ovf"><table className="tbl"><thead><tr>{["#", "Date & Time", "Material", "Grade", "Quantity", "Buyer", "Value", "Status", "Actions"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+          <tbody>{list.map((b) => (
+            editId === b.id ? (
+              <tr key={b.id} style={{ background: "var(--bg2)" }}>
+                <td>{b.id}</td>
+                <td>{b.date}</td>
+                <td><select className="in" value={editData.material} onChange={(e) => setEditData({ ...editData, material: e.target.value as Mat })}>{MATS.map((x) => <option key={x}>{x}</option>)}</select></td>
+                <td><select className="in" value={editData.grade} onChange={(e) => setEditData({ ...editData, grade: e.target.value })}>{["A", "B", "C"].map((x) => <option key={x}>{x}</option>)}</select></td>
+                <td><input className="in" type="number" value={editData.qty} onChange={(e) => setEditData({ ...editData, qty: +e.target.value })} style={{ width: 80 }} /> kg</td>
+                <td><input className="in" value={editData.buyer} onChange={(e) => setEditData({ ...editData, buyer: e.target.value })} style={{ width: 120 }} /></td>
+                <td><input className="in" type="number" value={editData.value} onChange={(e) => setEditData({ ...editData, value: +e.target.value })} style={{ width: 100 }} /></td>
+                <td><select className="in" value={editData.status} onChange={(e) => setEditData({ ...editData, status: e.target.value as Status })}>{["Scheduled", "In Transit", "Delivered"].map((x) => <option key={x}>{x}</option>)}</select></td>
+                <td><button className="btn" onClick={saveEdit} style={{ marginRight: 4 }}>Save</button><button className="btn ghost" onClick={() => setEditId(null)}>Cancel</button></td>
+              </tr>
+            ) : (
+              <tr key={b.id}>
+                <td>{b.id}</td>
+                <td>{b.date}</td>
+                <td style={{ color: MCOL[b.material] }}>{b.material}</td>
+                <td>{b.grade}</td>
+                <td>{b.qty} kg</td>
+                <td>{b.buyer}</td>
+                <td><b>{inr(b.value)}</b></td>
+                <td><select className={"stsel st " + b.status.replace(" ", "")} value={b.status} onChange={(e) => setBatches(batches.map((x) => (x.id === b.id ? { ...x, status: e.target.value as Status } : x)))}>{["Delivered", "In Transit", "Scheduled"].map((x) => <option key={x}>{x}</option>)}</select></td>
+                <td>
+                  <button className="ib" title="Edit batch" onClick={() => startEdit(b)}><I n="pencil" s={16} /></button>
+                  <button className="ib" title={`Delete ${b.id}`} onClick={() => deleteBatch(b.id)} style={{ marginLeft: 4 }}><I n="trash" s={16} /></button>
+                </td>
+              </tr>
+            )
+          ))}
+            {!list.length && <tr><td colSpan={9} className="mut">No batches found. Change the filters or add a batch above.</td></tr>}</tbody></table></div>
+      </div>
+    </>
   );
 }
 
@@ -387,17 +550,247 @@ const Tg = ({ on, set, label }: { on: boolean; set: (v: boolean) => void; label:
   <div className="between srow"><span>{label}</span><button role="switch" aria-checked={on} aria-label={label} className={"sw " + (on ? "on" : "")} onClick={() => set(!on)}><i /></button></div>
 );
 function Settings({ cfg, setCfg, reset }: { cfg: Cfg; setCfg: (c: Cfg) => void; reset: () => void }) {
+  const [tab, setTab] = useState<"profile" | "pricing" | "notifications" | "data" | "about">("profile");
+  const [pricing, setPricing] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
+
+  const tabs = [
+    { id: "profile" as const, label: "Profile", icon: "users" },
+    { id: "pricing" as const, label: "Pricing", icon: "coins" },
+    { id: "notifications" as const, label: "Notifications", icon: "bell" },
+    { id: "data" as const, label: "Data", icon: "dl" },
+    { id: "about" as const, label: "About", icon: "leaf" },
+  ];
+
+  const handleExportAll = async () => {
+    setExporting(true);
+    const data = { cfg, exportedAt: new Date().toISOString(), app: "ScrapFlow" };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "scrapflow-settings.json";
+    a.click();
+    setTimeout(() => setExporting(false), 1000);
+  };
+
+  const handleReset = () => {
+    if (resetConfirm) {
+      reset();
+      setResetConfirm(false);
+    } else {
+      setResetConfirm(true);
+      setTimeout(() => setResetConfirm(false), 5000);
+    }
+  };
+
   return (
-    <div className="g2">
-      <div className="card"><h2 style={{ marginBottom: 12 }}>Profile</h2>
-        <div className="fld"><span className="mut">Name</span><input value={cfg.name} onChange={(e) => setCfg({ ...cfg, name: e.target.value })} /></div>
-        <div className="fld"><span className="mut">Factory</span><select value={cfg.factory} onChange={(e) => setCfg({ ...cfg, factory: e.target.value })}>{FACTORIES.map((f) => <option key={f}>{f}</option>)}</select></div>
-        <p className="mut">Changes apply instantly.</p></div>
-      <div className="card"><h2 style={{ marginBottom: 6 }}>Preferences</h2>
-        <Tg on={cfg.alerts} set={(v) => setCfg({ ...cfg, alerts: v })} label="In-app alerts for new price changes" />
-        <Tg on={cfg.email} set={(v) => setCfg({ ...cfg, email: v })} label="Email a summary after each batch" />
-        <Tg on={cfg.autoRoute} set={(v) => setCfg({ ...cfg, autoRoute: v })} label="Auto-route scans to the best buyer" />
-        <button className="btn ghost" style={{ marginTop: 16 }} onClick={reset}>Reset demo data</button></div>
+    <div>
+      {/* Tab Header */}
+      <div className="card" style={{ padding: "8px 12px", marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 4, overflowX: "auto" }}>
+          {tabs.map((t) => (
+            <button key={t.id} className={"nav" + (tab === t.id ? " on" : "")} onClick={() => setTab(t.id)} style={{ padding: "10px 18px", borderRadius: 8, width: "auto", justifyContent: "center", fontSize: 13 }}>
+              <I n={t.icon} s={18} /> {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Profile Tab ── */}
+      {tab === "profile" && (
+        <div className="g2">
+          <div className="card">
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg, #128a5f, #0d5a40)", display: "grid", placeItems: "center", fontSize: 28, fontWeight: 600, color: "#04231a" }}>
+                {(cfg.name[0] || "?").toUpperCase()}
+              </div>
+              <div>
+                <h2 style={{ margin: 0 }}>{cfg.name || "User"}</h2>
+                <p className="mut" style={{ margin: 0 }}>Admin • {cfg.factory}</p>
+              </div>
+            </div>
+            <div className="fld"><span className="mut">Display Name</span><input value={cfg.name} onChange={(e) => setCfg({ ...cfg, name: e.target.value })} /></div>
+            <div className="fld"><span className="mut">Primary Factory</span><select value={cfg.factory} onChange={(e) => setCfg({ ...cfg, factory: e.target.value })}>{FACTORIES.map((f) => <option key={f}>{f}</option>)}</select></div>
+            <p className="mut" style={{ fontSize: 13, marginTop: 8 }}>Changes apply instantly to your dashboard.</p>
+          </div>
+
+          <div className="card">
+            <h2 style={{ marginBottom: 16 }}>Factory Locations</h2>
+            {FACTORIES.map((f) => (
+              <div key={f} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderTop: "1px solid var(--bd)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: cfg.factory === f ? "var(--g)" : "#1a2628", display: "grid", placeItems: "center", fontSize: 13, fontWeight: 600, color: cfg.factory === f ? "#04231a" : "var(--mut)" }}>
+                    <I n="bld" s={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: 14 }}>{f}</div>
+                    <div className="mut" style={{ fontSize: 12 }}>{cfg.factory === f ? "Active" : "Inactive"}</div>
+                  </div>
+                </div>
+                {cfg.factory === f && <span className="ok">Selected</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Pricing Tab ── */}
+      {tab === "pricing" && (
+        <div className="g2">
+          <div className="card">
+            <div className="between"><h2>Material Rates (₹/kg)</h2><button className="btn ghost" onClick={() => setPricing(!pricing)}><I n="pencil" s={16} /> {pricing ? "Done" : "Edit"}</button></div>
+            <p className="mut" style={{ fontSize: 13, marginBottom: 16 }}>Current base rates used for valuation. These are demo assumptions, not live market prices.</p>
+            {MATS.map((m) => (
+              <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--bd)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: MCOL[m] }} />
+                  <span style={{ fontWeight: 500, fontSize: 14 }}>{m}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {pricing ? (
+                    <input type="number" className="in" style={{ width: 90, textAlign: "right" }} defaultValue={PRICES[m]} />
+                  ) : (
+                    <span style={{ fontWeight: 600, fontSize: 15 }}>₹{PRICES[m]}/kg</span>
+                  )}
+                </div>
+              </div>
+            ))}
+            {pricing && (
+              <div style={{ marginTop: 16, padding: 12, background: "var(--bg2)", borderRadius: 8, fontSize: 13 }}>
+                <span style={{ color: "var(--g)" }}>ℹ️</span> <span className="mut">Rate editing is for demo purposes. In production, rates are synced from market data feeds.</span>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h2 style={{ marginBottom: 16 }}>Valuation Formula</h2>
+            <div style={{ background: "var(--bg2)", borderRadius: 10, padding: 16, marginBottom: 16, fontFamily: "monospace", fontSize: 14, lineHeight: 2 }}>
+              <div><span className="mut">Gross Value</span> = Weight × Base Rate × Grade Factor</div>
+              <div><span className="mut">Net Value</span> = Gross × (1 − Contamination%) − Logistics</div>
+            </div>
+            <h3 style={{ fontSize: 15, marginBottom: 12 }}>Grade Factors</h3>
+            {["A", "B", "C"].map((g, i) => (
+              <div key={g} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: "1px solid var(--bd)" }}>
+                <span>Grade {g}</span>
+                <span style={{ fontWeight: 600, color: ["var(--g)", "var(--tx)", "var(--mut)"][i] }}>{[1.0, 0.85, 0.7][i]}</span>
+              </div>
+            ))}
+            <h3 style={{ fontSize: 15, marginTop: 20, marginBottom: 12 }}>Pricing Engine</h3>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: "1px solid var(--bd)" }}>
+              <span className="ok">Deterministic</span>
+              <span className="mut" style={{ fontSize: 13 }}>Config-driven, not AI. AI only classifies material and grade.</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Notifications Tab ── */}
+      {tab === "notifications" && (
+        <div className="g2">
+          <div className="card">
+            <h2 style={{ marginBottom: 16 }}>Notification Preferences</h2>
+            <Tg on={cfg.alerts} set={(v) => setCfg({ ...cfg, alerts: v })} label="In-app alerts for new price changes" />
+            <Tg on={cfg.email} set={(v) => setCfg({ ...cfg, email: v })} label="Email a summary after each batch" />
+            <Tg on={cfg.autoRoute} set={(v) => setCfg({ ...cfg, autoRoute: v })} label="Auto-route scans to the best buyer" />
+          </div>
+
+          <div className="card">
+            <h2 style={{ marginBottom: 16 }}>Alert Types</h2>
+            {[
+              { label: "Price Changes", desc: "When material rates change", on: true },
+              { label: "Batch Updates", desc: "Status changes on your batches", on: true },
+              { label: "New Buyer Match", desc: "When a better buyer is found", on: false },
+              { label: "Inventory Alerts", desc: "Low stock or high contamination", on: false },
+            ].map((a) => (
+              <div key={a.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderTop: "1px solid var(--bd)" }}>
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: 14 }}>{a.label}</div>
+                  <div className="mut" style={{ fontSize: 12 }}>{a.desc}</div>
+                </div>
+                <div className={"tgl " + (a.on ? "on" : "")} style={{ cursor: "default" }}>{a.on ? "On" : "Off"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Data Tab ── */}
+      {tab === "data" && (
+        <div className="g2">
+          <div className="card">
+            <h2 style={{ marginBottom: 16 }}>Export Data</h2>
+            <p className="mut" style={{ fontSize: 13, marginBottom: 16 }}>Download your data for backup or analysis.</p>
+            <button className="btn" style={{ width: "100%", justifyContent: "center", marginBottom: 10 }} onClick={handleExportAll} disabled={exporting}>
+              <I n="dl" s={18} /> {exporting ? "Exporting..." : "Export Settings (JSON)"}
+            </button>
+            <button className="btn ghost" style={{ width: "100%", justifyContent: "center" }}>
+              <I n="dl" s={16} /> Export All Batches (CSV)
+            </button>
+          </div>
+
+          <div className="card">
+            <h2 style={{ marginBottom: 16 }}>Danger Zone</h2>
+            <div style={{ border: "1px solid #5a2020", borderRadius: 10, padding: 16 }}>
+              <h3 style={{ fontSize: 15, color: "#ff6b6b", marginBottom: 8 }}>Reset Demo Data</h3>
+              <p className="mut" style={{ fontSize: 13, marginBottom: 16 }}>This will reload the page with default seed data from Supabase. Custom changes to batches and buyers will be lost.</p>
+              <button className="btn" onClick={handleReset} style={{ background: resetConfirm ? "#ff4d4d" : "transparent", color: resetConfirm ? "#fff" : "#ff6b6b", border: "1px solid #5a2020" }}>
+                {resetConfirm ? "⚠️ Click again to confirm reset" : "Reset to Default"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── About Tab ── */}
+      {tab === "about" && (
+        <div className="g2">
+          <div className="card">
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+              <div style={{ width: 56, height: 56, borderRadius: 14, background: "linear-gradient(135deg, #128a5f, #0d5a40)", display: "grid", placeItems: "center", fontSize: 28 }}>
+                <I n="leaf" s={32} />
+              </div>
+              <div>
+                <h2 style={{ margin: 0 }}>ScrapFlow</h2>
+                <p className="mut" style={{ margin: 0 }}>Version 1.0.0 • Hackathon MVP</p>
+              </div>
+            </div>
+            <div style={{ borderTop: "1px solid var(--bd)", paddingTop: 16 }}>
+              <p style={{ fontSize: 14, lineHeight: 1.7, color: "#c9d6cf" }}>
+                AI-assisted factory scrap classification, valuation, and buyer routing platform. 
+                Designed for scrap dealers and recycling facilities to maximize recovery value 
+                through intelligent material sorting and market-aware routing.
+              </p>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2 style={{ marginBottom: 16 }}>Architecture</h2>
+            {[
+              { label: "Frontend", value: "React + Vite + TypeScript", icon: "box" },
+              { label: "Database", value: "Supabase (PostgreSQL)", icon: "layers" },
+              { label: "AI Module", value: "Python FastAPI + YOLO", icon: "cam" },
+              { label: "Pricing", value: "Deterministic Engine", icon: "coins" },
+              { label: "Styling", value: "Custom CSS (Dark Theme)", icon: "check" },
+            ].map((a) => (
+              <div key={a.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--bd)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <I n={a.icon} s={16} />
+                  <span style={{ fontSize: 14 }}>{a.label}</span>
+                </div>
+                <span className="mut" style={{ fontSize: 13 }}>{a.value}</span>
+              </div>
+            ))}
+
+            <h2 style={{ marginTop: 24, marginBottom: 16 }}>Supported Materials</h2>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {MATS.map((m) => (
+                <span key={m} className="chip" style={{ color: MCOL[m], borderColor: MCOL[m] + "44" }}>{m}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -411,8 +804,8 @@ export default function App() {
   const [menu, setMenu] = useState(false);
 
   // Supabase hooks
-  const { batches: dbBatches, loading: batchesLoading, addBatchBulk, updateBatchStatus, deleteBatch } = useBatches();
-  const { buyers: dbBuyers, loading: buyersLoading, addBuyer, toggleBuyer } = useBuyers();
+  const { batches: dbBatches, loading: batchesLoading, addBatchBulk, setBatchesAndSync } = useBatches();
+  const { buyers: dbBuyers, loading: buyersLoading, addBuyer, setBuyersAndSync } = useBuyers();
   const { settings, loading: settingsLoading, updateSettings } = useSettings();
 
   // Convert DB batches to UI format
@@ -438,6 +831,8 @@ export default function App() {
       state: b.state,
       rating: b.rating,
       active: b.active,
+      phone: b.phone || '',
+      email: b.email || '',
       rates: b.rates,
     }));
   }, [dbBuyers]);
@@ -470,6 +865,49 @@ export default function App() {
       value: x.value,
     }));
     await addBatchBulk(rows);
+  };
+
+  // Wrapper: convert UI Buyer[] to DB BuyerWithRates[] for setBuyersAndSync
+  const handleSetBuyers = (newUIBuyers: Buyer[]) => {
+    const full: import("./hooks/useBuyers").BuyerWithRates[] = newUIBuyers.map(ui => {
+      const db = dbBuyers.find(b => b.name === ui.name);
+      return {
+        id: db?.id || crypto.randomUUID(),
+        name: ui.name,
+        state: ui.state,
+        rating: ui.rating,
+        active: ui.active,
+        phone: ui.phone || null,
+        email: ui.email || null,
+        created_at: db?.created_at || new Date().toISOString(),
+        rates: ui.rates,
+      };
+    });
+    setBuyersAndSync(full);
+  };
+
+  // Wrapper: convert UI Batch[] to DB Batch[] for setBatchesAndSync
+  const handleSetBatches = (newUIBatches: Batch[]) => {
+    console.log('[Inventory] handleSetBatches called with', newUIBatches.length, 'batches');
+    const buyerNameToId: Record<string, string> = {};
+    dbBuyers.forEach(b => { buyerNameToId[b.name] = b.id; });
+    const full: import("./types/database").Batch[] = newUIBatches.map(ui => {
+      const db = dbBatches.find(b => b.id === ui.id);
+      return {
+        id: ui.id,
+        created_at: db?.created_at || new Date().toISOString(),
+        material: ui.material as MaterialCategory,
+        grade: ui.grade,
+        quantity: ui.qty,
+        buyer_id: buyerNameToId[ui.buyer] || db?.buyer_id || null,
+        value: ui.value,
+        status: ui.status as BatchStatus,
+        factory: db?.factory || 'Factory 1 – Ludhiana',
+        notes: db?.notes || null,
+      };
+    });
+    console.log('[Inventory] Calling setBatchesAndSync with', full.length, 'DB batches');
+    setBatchesAndSync(full);
   };
 
   // Update settings
@@ -526,31 +964,8 @@ export default function App() {
         </header>
         {page === "Dashboard" && <Dashboard batches={batches} ex={ex} go={setPage} />}
         {page === "Scan Scrap" && <Scan buyers={buyers} batches={batches} onAdd={addBatches} go={setPage} />}
-        {page === "Buyer Network" && <Buyers buyers={buyers} setBuyers={(bs) => {
-          // Handle buyer updates
-          bs.forEach(b => {
-            const existing = dbBuyers.find(db => db.name === b.name);
-            if (existing && existing.active !== b.active) {
-              toggleBuyer(existing.id, b.active);
-            }
-          });
-        }} />}
-        {page === "Inventory" && <Inventory batches={batches} setBatches={(bs) => {
-          // Handle batch updates (status changes, deletes)
-          bs.forEach(b => {
-            const existing = dbBatches.find(db => db.id === b.id);
-            if (!existing) return;
-            if (existing.status !== b.status) {
-              updateBatchStatus(b.id, b.status as BatchStatus);
-            }
-          });
-          // Check for deletions
-          dbBatches.forEach(db => {
-            if (!bs.find(b => b.id === db.id)) {
-              deleteBatch(db.id);
-            }
-          });
-        }} q={q} setQ={setQ} />}
+        {page === "Buyer Network" && <Buyers buyers={buyers} setBuyers={handleSetBuyers} />}
+        {page === "Inventory" && <Inventory batches={batches} setBatches={handleSetBatches} q={q} setQ={setQ} />}
         {page === "Reports" && <Reports batches={batches} />}
         {page === "Settings" && <Settings cfg={cfg} setCfg={setCfg} reset={resetData} />}
       </main>
