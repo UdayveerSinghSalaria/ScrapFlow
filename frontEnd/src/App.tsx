@@ -21,9 +21,9 @@ interface Extra { kg: number; val: number; n: number }
 const PAGES: Page[] = ["Dashboard", "Scan Scrap", "Buyer Network", "Inventory", "Reports", "Settings"];
 const PICON: Record<Page, string> = { Dashboard: "grid", "Scan Scrap": "scan", "Buyer Network": "net", Inventory: "inv", Reports: "rep", Settings: "set" };
 const FACTORIES = ["Factory 1 – Ludhiana", "Factory 2 – Rajpura", "Factory 3 – Mohali"];
-const MATS: Mat[] = ["Copper", "Aluminium", "Steel", "Brass"];
-const MCOL: Record<Mat, string> = { Copper: "#f08a3c", Aluminium: "#e9f2ed", Steel: "#4da3ff", Brass: "#e6c04a", "Stainless Steel": "#a8b0b8", Plastic: "#5cb85c", "Mixed Scrap": "#9aa0a6" };
-const PRICES: Record<Mat, number> = { Copper: 720, Aluminium: 170, Steel: 46, Brass: 405, "Stainless Steel": 120, Plastic: 15, "Mixed Scrap": 58 };
+const MATS: Mat[] = ["Copper", "Aluminium", "Steel", "Iron", "Brass"];
+const MCOL: Record<Mat, string> = { Copper: "#f08a3c", Aluminium: "#e9f2ed", Steel: "#4da3ff", Iron: "#b87333", Brass: "#e6c04a", "Stainless Steel": "#a8b0b8", Plastic: "#5cb85c", "Mixed Scrap": "#9aa0a6" };
+const PRICES: Record<Mat, number> = { Copper: 720, Aluminium: 170, Steel: 46, Iron: 35, Brass: 405, "Stainless Steel": 120, Plastic: 15, "Mixed Scrap": 58 };
 const PAL: Record<string, string[]> = {
   mix: ["#5a5f66", "#2b2f35", "#8a5a3a", "#b87333", "#9aa0a6", "#3a3f45"],
   Copper: ["#3b2a22", "#b87333", "#6b4a35", "#d99058", "#2b2f35"],
@@ -293,13 +293,18 @@ function Scan({ buyers, batches, onAdd, go }: { buyers: Buyer[]; batches: Batch[
   const [busy, setBusy] = useState(false);
   const url = useMemo(() => (file ? URL.createObjectURL(file) : ""), [file]);
   const run = async () => { setBusy(true); setRes(null); setRes(await detectScrap(file, kg, depth)); setBusy(false); };
+  const GRADE_FACTOR: Record<string, number> = { A: 1.0, B: 0.85, C: 0.70 };
+  const LOGISTICS_PER_KG = 0.15;
   const rows = (res || []).map((d) => {
     const all = buyers.filter((b) => b.active && b.rates[d.material]);
     const best = bestBuyer(buyers, d.material), pick = opt ? best : all[0];
-    const adj = check ? d.purity / 100 : 1, rate = pick?.rates[d.material] || 0;
-    return { ...d, buyer: pick?.name || "—", rate, value: rate * d.qty * adj, edge: ((best?.rates[d.material] || 0) - (all[0]?.rates[d.material] || 0)) * d.qty * adj };
+    const rate = pick?.rates[d.material] || PRICES[d.material] || 0;
+    const gradeFactor = GRADE_FACTOR[d.grade] ?? 0.85;
+    const gross = d.qty * rate * gradeFactor;
+    const net = check ? gross * (1 - (100 - d.purity) / 100) - d.qty * LOGISTICS_PER_KG : gross;
+    return { ...d, buyer: pick?.name || "—", rate, value: Math.max(0, net), edge: ((best?.rates[d.material] || PRICES[d.material] || 0) - (all[0]?.rates[d.material] || PRICES[d.material] || 0)) * d.qty * gradeFactor };
   });
-  const total = rows.reduce((a, r) => a + r.value, 0), mixed = kg * 58;
+  const total = rows.reduce((a, r) => a + r.value, 0), mixed = kg * PRICES["Mixed Scrap"];
   const conf = Math.round(rows.reduce((a, r) => a + r.conf * r.qty, 0) / kg);
   const contam = (100 - rows.reduce((a, r) => a + r.purity * r.qty, 0) / kg).toFixed(1) + "%";
   const confirm = () => { onAdd(rows.map((r) => ({ material: r.material, grade: r.grade, qty: r.qty, buyer: r.buyer, value: Math.round(r.value) }))); setRes(null); go("Inventory"); };
@@ -335,7 +340,7 @@ function Scan({ buyers, batches, onAdd, go }: { buyers: Buyer[]; batches: Batch[
             <div className="leg">{rows.map((r) => <span key={r.material}><i style={{ background: MCOL[r.material] }} />{r.material} {Math.round((r.qty / kg) * 100)}%</span>)}</div>
             {rows.map((r) => <div className="rr" key={r.material}><div><b style={{ color: MCOL[r.material] }}>{r.material}</b><div className="mut">{r.qty} kg · Grade {r.grade} · {r.conf}% sure</div></div><div><b>{inr(r.value)}</b><div className="mut">{r.buyer} · ₹{r.rate}/kg</div></div></div>)}
             <div className="mini" style={{ marginTop: 14 }}>
-              <div><small className="mut">Mixed lot @ ₹58/kg</small><b>{inr(mixed)}</b></div>
+              <div><small className="mut">Mixed lot @ ₹{PRICES["Mixed Scrap"]}/kg</small><b>{inr(mixed)}</b></div>
               <div><small className="mut">Separated</small><b>{inr(total)}</b></div>
               <div><small className="mut">Value gain</small><b style={{ color: "var(--g)" }}>{total >= mixed ? "+" : "−"}{inr(Math.abs(total - mixed))}</b></div></div>
             <div className="mini">

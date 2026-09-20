@@ -1,6 +1,6 @@
 // Database types matching Supabase schema
 
-export type MaterialCategory = 'Copper' | 'Aluminium' | 'Steel' | 'Brass' | 'Stainless Steel' | 'Plastic' | 'Mixed Scrap'
+export type MaterialCategory = 'Copper' | 'Aluminium' | 'Steel' | 'Iron' | 'Brass' | 'Stainless Steel' | 'Plastic' | 'Mixed Scrap'
 export type BatchStatus = 'Delivered' | 'In Transit' | 'Scheduled'
 export type Factory = 'Factory 1 – Ludhiana' | 'Factory 2 – Rajpura' | 'Factory 3 – Mohali'
 

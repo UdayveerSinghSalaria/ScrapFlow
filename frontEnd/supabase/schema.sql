@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS buyers (
 CREATE TABLE IF NOT EXISTS buyer_rates (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   buyer_id UUID NOT NULL REFERENCES buyers(id) ON DELETE CASCADE,
-  material TEXT NOT NULL CHECK (material IN ('Copper', 'Aluminium', 'Steel', 'Brass', 'Stainless Steel', 'Plastic', 'Mixed Scrap')),
+  material TEXT NOT NULL CHECK (material IN ('Copper', 'Aluminium', 'Steel', 'Iron', 'Brass', 'Stainless Steel', 'Plastic', 'Mixed Scrap')),
   rate INTEGER NOT NULL CHECK (rate > 0),
   UNIQUE(buyer_id, material)
 );
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS buyer_rates (
 CREATE TABLE IF NOT EXISTS batches (
   id TEXT PRIMARY KEY, -- SC2841 format
   created_at TIMESTAMPTZ DEFAULT now(),
-  material TEXT NOT NULL CHECK (material IN ('Copper', 'Aluminium', 'Steel', 'Brass', 'Stainless Steel', 'Plastic', 'Mixed Scrap')),
+  material TEXT NOT NULL CHECK (material IN ('Copper', 'Aluminium', 'Steel', 'Iron', 'Brass', 'Stainless Steel', 'Plastic', 'Mixed Scrap')),
   grade TEXT NOT NULL,
   quantity INTEGER NOT NULL CHECK (quantity > 0),
   buyer_id UUID REFERENCES buyers(id) ON DELETE SET NULL,
@@ -73,15 +73,20 @@ ON CONFLICT (id) DO NOTHING;
 -- Insert buyer rates
 INSERT INTO buyer_rates (buyer_id, material, rate) VALUES
   ('a1111111-1111-1111-1111-111111111111', 'Steel', 48),
+  ('a1111111-1111-1111-1111-111111111111', 'Iron', 36),
   ('a1111111-1111-1111-1111-111111111111', 'Aluminium', 160),
   ('b2222222-2222-2222-2222-222222222222', 'Copper', 720),
+  ('b2222222-2222-2222-2222-222222222222', 'Iron', 34),
   ('b2222222-2222-2222-2222-222222222222', 'Brass', 405),
   ('c3333333-3333-3333-3333-333333333333', 'Brass', 410),
   ('c3333333-3333-3333-3333-333333333333', 'Copper', 700),
+  ('c3333333-3333-3333-3333-333333333333', 'Iron', 35),
   ('d4444444-4444-4444-4444-444444444444', 'Aluminium', 175),
   ('d4444444-4444-4444-4444-444444444444', 'Steel', 46),
+  ('d4444444-4444-4444-4444-444444444444', 'Iron', 37),
   ('e5555555-5555-5555-5555-555555555555', 'Copper', 705),
   ('e5555555-5555-5555-5555-555555555555', 'Aluminium', 170),
+  ('e5555555-5555-5555-5555-555555555555', 'Iron', 33),
   ('f6666666-6666-6666-6666-666666666666', 'Steel', 44),
   ('f6666666-6666-6666-6666-666666666666', 'Brass', 395)
 ON CONFLICT DO NOTHING;
