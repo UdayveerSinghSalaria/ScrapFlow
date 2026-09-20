@@ -23,7 +23,7 @@ const PICON: Record<Page, string> = { Dashboard: "grid", "Scan Scrap": "scan", "
 const FACTORIES = ["Factory 1 – Ludhiana", "Factory 2 – Rajpura", "Factory 3 – Mohali"];
 const MATS: Mat[] = ["Copper", "Aluminium", "Steel", "Iron", "Brass"];
 const MCOL: Record<Mat, string> = { Copper: "#f08a3c", Aluminium: "#e9f2ed", Steel: "#4da3ff", Iron: "#b87333", Brass: "#e6c04a", "Stainless Steel": "#a8b0b8", Plastic: "#5cb85c", "Mixed Scrap": "#9aa0a6" };
-const PRICES: Record<Mat, number> = { Copper: 720, Aluminium: 170, Steel: 46, Iron: 35, Brass: 405, "Stainless Steel": 120, Plastic: 15, "Mixed Scrap": 58 };
+const PRICES: Record<Mat, number> = { Copper: 720, Aluminium: 170, Steel: 46, Iron: 35, Brass: 405, "Stainless Steel": 120, Plastic: 15, "Mixed Scrap": 25 };
 const PAL: Record<string, string[]> = {
   mix: ["#5a5f66", "#2b2f35", "#8a5a3a", "#b87333", "#9aa0a6", "#3a3f45"],
   Copper: ["#3b2a22", "#b87333", "#6b4a35", "#d99058", "#2b2f35"],
@@ -259,7 +259,7 @@ function Dashboard({ batches, ex, go }: { batches: Batch[]; ex: Extra; go: (p: P
       <div className="card">
         <h2 style={{ marginBottom: 12 }}>Value Comparison</h2>
         <div className="vc">
-          <div className="vbox"><span className="vico"><I n="trash" s={26} /></span><div><small className="mut">Current Method (Mixed Lot)</small><div style={{ fontSize: 16, fontWeight: 600 }}>1,000 kg</div><small className="mut">₹58 / kg</small><div className="vnum">₹58,000</div></div></div>
+          <div className="vbox"><span className="vico"><I n="trash" s={26} /></span><div><small className="mut">Current Method (Mixed Lot)</small><div style={{ fontSize: 16, fontWeight: 600 }}>1,000 kg</div><small className="mut">₹{PRICES["Mixed Scrap"]} / kg</small><div className="vnum">{inr(1000 * PRICES["Mixed Scrap"])}</div></div></div>
           <div className="mid"><I n="arr" s={22} /></div>
           <div className="vbox good">
             <span className="vico g"><I n="layers" s={26} /></span>
